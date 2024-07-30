@@ -8,7 +8,6 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 llama-parse = "^0.3.5"
-chainlit = "^1.0.301"
 llama-index = "^0.10.17"
 
 

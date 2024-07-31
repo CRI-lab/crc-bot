@@ -1,54 +1,86 @@
 import os
-
-import chainlit as cl
+import logging
+import streamlit as st
 import openai
-from llama_index.core import (Settings, SimpleDirectoryReader, StorageContext,
-                              VectorStoreIndex, load_index_from_storage)
-from llama_index.core.callbacks import CallbackManager
-from llama_index.core.query_engine.retriever_query_engine import \
-    RetrieverQueryEngine
-from llama_index.core.service_context import ServiceContext
-from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
+from llama_index.core import VectorStoreIndex,  StorageContext, Settings, load_index_from_storage
+from llama_index.vector_stores.milvus import MilvusVectorStore
 
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+st.set_page_config(page_title="Chat with the Streamlit docs, powered by LlamaIndex", page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
+openai.api_key = st.secrets.openai_key
+st.title("Chat with the Streamlit docs, powered by LlamaIndex 💬🦙")
+st.info("Check out the full tutorial to build this app in our [blog post](https://blog.streamlit.io/build-a-chatbot-with-custom-data-sources-powered-by-llamaindex/)", icon="📃")
 
-try:
-    # rebuild storage context
-    storage_context = StorageContext.from_defaults(persist_dir="./storage")
-    # load index
-    index = load_index_from_storage(storage_context)
-except:
-    documents = SimpleDirectoryReader("./data").load_data(show_progress=True)
-    index = VectorStoreIndex.from_documents(documents)
-    index.storage_context.persist()
+if "messages" not in st.session_state.keys():  # Initialize the chat messages history
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "Ask me a question about CRC's Publications!",
+        }
+    ]
 
-
-@cl.on_chat_start
-async def start():
-    Settings.llm = OpenAI(
-        model="gpt-3.5-turbo", temperature=0.1, max_tokens=1024, streaming=True
+def get_vector_store():
+    address = os.getenv("MILVUS_ADDRESS")
+    collection = os.getenv("MILVUS_COLLECTION")
+    if not address or not collection:
+        raise ValueError(
+            "Please set MILVUS_ADDRESS and MILVUS_COLLECTION to your environment variables"
+            " or config them in the .env file"
+        )
+    store = MilvusVectorStore(
+        uri=address,
+        user=os.getenv("MILVUS_USERNAME"),
+        password=os.getenv("MILVUS_PASSWORD"),
+        collection_name=collection,
+        dim=int(os.getenv("EMBEDDING_DIM")),
     )
-    Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
-    Settings.context_window = 4096
+    return store
 
-    service_context = ServiceContext.from_defaults(callback_manager=CallbackManager([cl.LlamaIndexCallbackHandler()]))
-    query_engine = index.as_query_engine(streaming=True, similarity_top_k=2, service_context=service_context)
-    cl.user_session.set("query_engine", query_engine)
+@st.cache_resource(show_spinner=False)
+def load_data():
+    Settings.llm = OpenAI(
+        model="gpt-4o-mini",
+        temperature=0.2,
+        system_prompt=os.getenv("SYSTEM_PROMPT"),
+    )
+    
+    store = get_vector_store()
+    index = VectorStoreIndex.from_vector_store(store)
+    return index
 
-    await cl.Message(
-        author="Assistant", content="Hello! Im an AI assistant. How may I help you?"
-    ).send()
 
+index = load_data()
 
-@cl.on_message
-async def main(message: cl.Message):
-    query_engine = cl.user_session.get("query_engine") # type: RetrieverQueryEngine
+if index is None:
+    print("Connection to Milvus Failed")
 
-    msg = cl.Message(content="", author="Assistant")
+system_prompt=os.getenv("SYSTEM_PROMPT")
+top_k = os.getenv("TOP_K", 3)
 
-    res = await cl.make_async(query_engine.query)(message.content)
+if "chat_engine" not in st.session_state.keys():  # Initialize the chat engine
+    st.session_state.chat_engine = index.as_chat_engine(
+        similarity_top_k=int(top_k),
+        system_prompt=system_prompt,
+        chat_mode="condense_plus_context", 
+        verbose=True, 
+    )
 
-    for token in res.response_gen:
-        await msg.stream_token(token)
-    await msg.send()
+print(st.session_state.messages)
+
+if prompt := st.chat_input(
+    "Ask a question"
+):  # Prompt for user input and save to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+for message in st.session_state.messages:  # Write message history to UI
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+# If last message is not from assistant, generate a new response
+if st.session_state.messages[-1]["role"] != "assistant":
+    with st.chat_message("assistant"):
+        response_stream = st.session_state.chat_engine.stream_chat(prompt)
+        st.write_stream(response_stream.response_gen)
+        message = {"role": "assistant", "content": response_stream.response}
+        # Add response to message history
+        st.session_state.messages.append(message)

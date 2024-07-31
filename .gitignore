@@ -2,6 +2,6 @@ data/
 pubs/
 md/
 storage/
-.chainlit/
 .files
 .env
+.streamlit/

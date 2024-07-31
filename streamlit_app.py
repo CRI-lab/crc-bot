@@ -1,5 +1,4 @@
 import os
-import logging
 import streamlit as st
 import openai
 from llama_index.llms.openai import OpenAI
@@ -7,7 +6,7 @@ from llama_index.core import VectorStoreIndex,  StorageContext, Settings, load_i
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 st.set_page_config(page_title="Chat with the Streamlit docs, powered by LlamaIndex", page_icon="🦙", layout="centered", initial_sidebar_state="auto", menu_items=None)
-openai.api_key = st.secrets.openai_key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 st.title("Chat with the Streamlit docs, powered by LlamaIndex 💬🦙")
 st.info("Check out the full tutorial to build this app in our [blog post](https://blog.streamlit.io/build-a-chatbot-with-custom-data-sources-powered-by-llamaindex/)", icon="📃")
 
@@ -24,7 +23,7 @@ def get_vector_store():
     collection = os.getenv("MILVUS_COLLECTION")
     if not address or not collection:
         raise ValueError(
-            "Please set MILVUS_ADDRESS and MILVUS_COLLECTION to your environment variables"
+            "Please set milvus_address and milvus_collection to your environment variables"
             " or config them in the .env file"
         )
     store = MilvusVectorStore(
@@ -41,7 +40,6 @@ def load_data():
     Settings.llm = OpenAI(
         model="gpt-4o-mini",
         temperature=0.2,
-        system_prompt=os.getenv("SYSTEM_PROMPT"),
     )
     
     store = get_vector_store()
@@ -64,8 +62,6 @@ if "chat_engine" not in st.session_state.keys():  # Initialize the chat engine
         chat_mode="condense_plus_context", 
         verbose=True, 
     )
-
-print(st.session_state.messages)
 
 if prompt := st.chat_input(
     "Ask a question"

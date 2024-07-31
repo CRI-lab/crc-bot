@@ -41,8 +41,20 @@ def load_data():
         model="gpt-4o-mini",
         temperature=0.2,
     )
-    
-    store = get_vector_store()
+    address = os.getenv("MILVUS_ADDRESS")
+    collection = os.getenv("MILVUS_COLLECTION")
+    if not address or not collection:
+        raise ValueError(
+            "Please set milvus_address and milvus_collection to your environment variables"
+            " or config them in the .env file"
+        )
+    store = MilvusVectorStore(
+        uri=address,
+        user=os.getenv("MILVUS_USERNAME"),
+        password=os.getenv("MILVUS_PASSWORD"),
+        collection_name=collection,
+        dim=int(os.getenv("EMBEDDING_DIM")),
+    )
     index = VectorStoreIndex.from_vector_store(store)
     return index
 
